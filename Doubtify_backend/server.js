@@ -1,31 +1,61 @@
-// server.js
-
-require('dotenv').config(); // Load environment variables from .env
 const express = require('express');
+
 const http = require('http');
+const { Server } = require('socket.io');
 const cors = require('cors');
-const mongoose = require('mongoose');
-const routes = require('./src/routes'); // Adjust path if needed
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
-const app = express(); // Initialize express app
-const server = http.createServer(app); // Create HTTP server
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
 
-const PORT = process.env.PORT || 5000;
-
-// Apply middleware
 app.use(cors());
-app.use(express.json()); 
+app.use(express.json());
 
-// Use your routes from the `routes` folder
-app.use('/api', routes);
+require('dotenv').config();
+const mongoose = require('mongoose');
 
-// MongoDB connection setup
-mongoose
-  .connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
-  .catch((error) => console.error('MongoDB connection failed:', error));
+  .catch((err) => console.error('MongoDB connection error:', err));
 
-// Start the server
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+
+const users = []; // Temporary storage for users
+
+io.on('connection', (socket) => {
+  console.log('New client connected:', socket.id);
+
+  socket.on('sendQuery', (data) => {
+    io.emit('receiveQuery', data); // Broadcast query to experts
+  });
+
+  socket.on('bid', (bid) => {
+    io.emit('receiveBid', bid); // Notify user of new bids
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
 });
+
+app.post('/register', async (req, res) => {
+  const { username, password } = req.body;
+  const hashedPassword = await bcrypt.hash(password, 10);
+  users.push({ username, password: hashedPassword });
+  res.status(201).send('User registered');
+});
+
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  const user = users.find((u) => u.username === username);
+  if (user && await bcrypt.compare(password, user.password)) {
+    const token = jwt.sign({ username }, 'secretkey');
+    res.json({ token });
+  } else {
+    res.status(401).send('Invalid credentials');
+  }
+});
+
+const PORT = 5000;
+server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
